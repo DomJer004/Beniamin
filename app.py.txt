@@ -1,0 +1,205 @@
+import streamlit as st
+import pandas as pd
+import io
+import os
+
+# Konfiguracja strony
+st.set_page_config(
+    page_title="Liga Mistrzów 25/26",
+    page_icon="⚽",
+    layout="wide"
+)
+
+# Tytuł aplikacji
+st.title("⚽ Liga Mistrzów 25/26 - Centrum Statystyk")
+
+# --- MAPPING PLIKÓW ---
+# Słownik mapujący nazwy drużyn na nazwy plików. 
+# Jeśli nazwa w tabeli różni się od nazwy pliku, tutaj to korygujemy.
+TEAM_FILES = {
+    "Ajax": "Liga Mistrzów 25_26.xlsx - Ajax.csv",
+    "Arsenal": "Liga Mistrzów 25_26.xlsx - Arsenal.csv",
+    "Atalanta": "Liga Mistrzów 25_26.xlsx - Atalanta.csv",
+    "Athletic Bilbao": "Liga Mistrzów 25_26.xlsx - Athletic.csv",
+    "Atlético Madryt": "Liga Mistrzów 25_26.xlsx - Atletico.csv",
+    "Barcelona": "Liga Mistrzów 25_26.xlsx - Barcelona.csv",
+    "Bayern Monachium": "Liga Mistrzów 25_26.xlsx - Bayern.csv",
+    "Benfica": "Liga Mistrzów 25_26.xlsx - Benfica.csv",
+    "Bodø/Glimt": "Liga Mistrzów 25_26.xlsx - Bodo.csv",
+    "Borussia Dortmund": "Liga Mistrzów 25_26.xlsx - Borussia.csv",
+    "Club Brugge": "Liga Mistrzów 25_26.xlsx - Brugge.csv",
+    "Chelsea": "Liga Mistrzów 25_26.xlsx - Chelsea.csv",
+    "Manchester City": "Liga Mistrzów 25_26.xlsx - City.csv",
+    "Eintracht Frankfurt": "Liga Mistrzów 25_26.xlsx - Frankfurt.csv",
+    "Galatasaray": "Liga Mistrzów 25_26.xlsx - Galatasaray.csv",
+    "Inter Mediolan": "Liga Mistrzów 25_26.xlsx - Inter.csv",
+    "Juventus": "Liga Mistrzów 25_26.xlsx - Juventus.csv",
+    "Kairat Ałmaty": "Liga Mistrzów 25_26.xlsx - Kairat.csv",
+    "FC Kopenhaga": "Liga Mistrzów 25_26.xlsx - Kopenhaga.csv",
+    "Bayer Leverkusen": "Liga Mistrzów 25_26.xlsx - Leverkusen.csv",
+    "Liverpool": "Liga Mistrzów 25_26.xlsx - Liverpool.csv",
+    "Olympique Marsylia": "Liga Mistrzów 25_26.xlsx - Marsylia.csv",
+    "AS Monaco": "Liga Mistrzów 25_26.xlsx - Monaco.csv",
+    "Napoli": "Liga Mistrzów 25_26.xlsx - Napoli.csv",
+    "Newcastle United": "Liga Mistrzów 25_26.xlsx - Newcastle.csv",
+    "Olympiacos": "Liga Mistrzów 25_26.xlsx - Olympiacos.csv",
+    "Pafos": "Liga Mistrzów 25_26.xlsx - Pafos.csv",
+    "Paris Saint-Germain": "Liga Mistrzów 25_26.xlsx - PSG.csv",
+    "PSV Eindhoven": "Liga Mistrzów 25_26.xlsx - PSV.csv",
+    "Real Madryt": "Liga Mistrzów 25_26.xlsx - Real.csv",
+    "Slavia Praga": "Liga Mistrzów 25_26.xlsx - Slavia.csv",
+    "Sporting CP": "Liga Mistrzów 25_26.xlsx - Sporting.csv",
+    "Tottenham Hotspur": "Liga Mistrzów 25_26.xlsx - Tottenham.csv",
+    "Union Saint-Gilloise": "Liga Mistrzów 25_26.xlsx - USG.csv",
+    "Villarreal": "Liga Mistrzów 25_26.xlsx - Villarreal.csv",
+    "Karabach Agdam": "Liga Mistrzów 25_26.xlsx - Karabach.csv"
+}
+
+# --- FUNKCJE POMOCNICZE ---
+
+def load_csv(filename):
+    """Ładuje prosty plik CSV (dla tabeli i strzelców)."""
+    if os.path.exists(filename):
+        return pd.read_csv(filename)
+    else:
+        st.error(f"Nie znaleziono pliku: {filename}")
+        return None
+
+def parse_team_file(filename):
+    """
+    Parsuje złożony plik zespołu, który zawiera wiele sekcji (Skład, Sztab, Mecze)
+    w jednym pliku CSV.
+    """
+    if not os.path.exists(filename):
+        st.error(f"Brak danych szczegółowych dla tego zespołu (plik {filename} nie istnieje).")
+        return None, None, None
+
+    with open(filename, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+
+    # Znajdowanie punktów podziału w pliku
+    squad_start = 0
+    staff_start = -1
+    matches_start = -1
+
+    for i, line in enumerate(lines):
+        if "numer,imię i nazwisko" in line and i == 0:
+            squad_start = i
+        elif "lp,imię i nazwisko,funkcja" in line or "rola,narodowość" in line:
+            staff_start = i
+        elif "kolejka,gospodarze,goście" in line:
+            matches_start = i
+
+    # Wczytywanie sekcji SKŁAD
+    squad_data = ""
+    end_squad = staff_start if staff_start != -1 else (matches_start if matches_start != -1 else len(lines))
+    
+    # Pomijamy wiersze podsumowujące (często są puste lub zawierają tylko statystyki zbiorcze przed nową sekcją)
+    raw_squad_lines = lines[squad_start:end_squad]
+    clean_squad_lines = [line for line in raw_squad_lines if line.strip() and not line.startswith(',,,,,,,')]
+    squad_data = "".join(clean_squad_lines)
+    
+    df_squad = pd.read_csv(io.StringIO(squad_data))
+
+    # Wczytywanie sekcji SZTAB (jeśli istnieje)
+    df_staff = pd.DataFrame()
+    if staff_start != -1:
+        end_staff = matches_start if matches_start != -1 else len(lines)
+        raw_staff_lines = lines[staff_start:end_staff]
+        clean_staff_lines = [line for line in raw_staff_lines if line.strip() and not line.startswith(',,,,,,,')]
+        staff_data = "".join(clean_staff_lines)
+        try:
+            df_staff = pd.read_csv(io.StringIO(staff_data))
+        except:
+            pass # Ignoruj błędy parsowania sztabu
+
+    # Wczytywanie sekcji MECZE (jeśli istnieje)
+    df_matches = pd.DataFrame()
+    if matches_start != -1:
+        matches_data = "".join(lines[matches_start:])
+        try:
+            df_matches = pd.read_csv(io.StringIO(matches_data))
+        except:
+            pass
+
+    return df_squad, df_staff, df_matches
+
+# --- INTERFEJS UŻYTKOWNIKA ---
+
+# Pasek boczny
+st.sidebar.header("Nawigacja")
+option = st.sidebar.radio("Wybierz widok:", ["Tabela Ligowa", "Klasyfikacja Strzelców", "Szczegóły Zespołu"])
+
+# 1. TABELA LIGOWA
+if option == "Tabela Ligowa":
+    st.header("🏆 Tabela Ligi Mistrzów")
+    df_tabela = load_csv("Liga Mistrzów 25_26.xlsx - Tabela.csv")
+    
+    if df_tabela is not None:
+        # Formatowanie tabeli
+        st.dataframe(
+            df_tabela.style.background_gradient(subset=['punkty'], cmap="Greens"),
+            use_container_width=True,
+            hide_index=True
+        )
+
+# 2. KLASYFIKACJA STRZELCÓW
+elif option == "Klasyfikacja Strzelców":
+    st.header("⚽ Najlepsi Strzelcy")
+    df_strzelcy = load_csv("Liga Mistrzów 25_26.xlsx - Strzelcy.csv")
+    
+    if df_strzelcy is not None:
+        # Oczyszczenie danych (usunięcie pustych wierszy z nazwami kolumn w środku pliku, jeśli są)
+        df_strzelcy = df_strzelcy[df_strzelcy['numer'].notna()]
+        
+        # Wybór kluczowych kolumn do wyświetlenia
+        cols_to_show = ['Miejsce', 'imię i nazwisko', 'liczba goli', 'kraj', 'pozycja', 'wiek']
+        # Sprawdzamy czy kolumny istnieją w pliku, żeby uniknąć błędu
+        available_cols = [c for c in cols_to_show if c in df_strzelcy.columns]
+        
+        st.dataframe(
+            df_strzelcy[available_cols],
+            use_container_width=True,
+            hide_index=True
+        )
+
+# 3. SZCZEGÓŁY ZESPOŁU
+elif option == "Szczegóły Zespołu":
+    st.header("🛡️ Analiza Drużyny")
+    
+    # Pobranie listy drużyn z mapowania
+    team_list = sorted(list(TEAM_FILES.keys()))
+    selected_team = st.selectbox("Wybierz drużynę:", team_list)
+    
+    file_path = TEAM_FILES.get(selected_team)
+    
+    if file_path:
+        df_squad, df_staff, df_matches = parse_team_file(file_path)
+        
+        # TABS dla lepszej organizacji
+        tab1, tab2, tab3 = st.tabs(["Skład i Statystyki", "Terminarz i Wyniki", "Sztab Szkoleniowy"])
+        
+        with tab1:
+            st.subheader(f"Skład: {selected_team}")
+            if df_squad is not None and not df_squad.empty:
+                st.dataframe(df_squad, use_container_width=True, hide_index=True)
+            else:
+                st.info("Brak danych o składzie.")
+                
+        with tab2:
+            st.subheader("Mecze")
+            if df_matches is not None and not df_matches.empty:
+                st.dataframe(df_matches, use_container_width=True, hide_index=True)
+            else:
+                st.info("Brak danych o meczach.")
+                
+        with tab3:
+            st.subheader("Sztab i Trenerzy")
+            if df_staff is not None and not df_staff.empty:
+                st.dataframe(df_staff, use_container_width=True, hide_index=True)
+            else:
+                st.info("Brak szczegółowych danych o sztabie.")
+
+# Stopka
+st.markdown("---")
+st.caption("Dane na sezon 25/26 | Wygenerowano za pomocą Streamlit")
